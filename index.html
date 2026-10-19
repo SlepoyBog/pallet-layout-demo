@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Демонстрационный расчёт укладки труб</title>
+  <style>
+    :root { color-scheme: light; font-family: Arial, sans-serif; background:#f3f6f8; color:#173042; }
+    * { box-sizing:border-box; }
+    body { margin:0; padding:20px; }
+    main { max-width:1500px; margin:auto; }
+    h1 { font-size:23px; margin:0 0 15px; }
+    .controls { display:flex; gap:12px; flex-wrap:wrap; align-items:end; margin-bottom:14px; }
+    label { display:grid; gap:5px; font-size:13px; font-weight:600; }
+    select, button, input { font:inherit; }
+    select, button, input[type=number] { min-height:38px; border:1px solid #aebfc9; border-radius:6px; background:white; color:#173042; padding:6px 10px; }
+    input[type=number] { width:145px; }
+    button { cursor:pointer; }
+    button:hover { background:#e9f1f5; }
+    .range { min-width:180px; }
+    .range input { width:100%; }
+    .toggle { display:flex; gap:7px; align-items:center; min-height:38px; }
+    .metrics { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 12px; }
+    .choices { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:0 0 12px; }
+    .choice { display:block; width:100%; min-height:0; padding:12px 14px; text-align:left; white-space:normal; }
+    .choice[aria-pressed=true] { border:2px solid #176d84; background:#eaf6f8; }
+    .choice strong { display:block; font-size:17px; margin-bottom:6px; }
+    .choice .choice-row { display:block; margin-top:4px; font-size:14px; }
+    .choice .caution { display:block; margin-top:6px; color:#a04618; font-weight:600; }
+    .metric { background:white; border:1px solid #d6e0e6; border-radius:6px; padding:8px 12px; min-width:130px; }
+    .metric small { display:block; color:#526a78; margin-bottom:3px; }
+    .metric strong { font-size:18px; font-weight:600; font-variant-numeric:tabular-nums; }
+    .metric.problem { border-color:#c94747; background:#fff0ef; color:#842828; }
+    .mainview, .panel { background:white; border:1px solid #d6e0e6; border-radius:8px; overflow:hidden; }
+    .mainview { position:relative; }
+    #view3d { display:block; width:100%; height:min(66vh,720px); min-height:420px; touch-action:none; cursor:grab; }
+    #view3d:active { cursor:grabbing; }
+    .hint { position:absolute; left:12px; bottom:9px; color:#526a78; font-size:12px; background:#ffffffd9; padding:5px 7px; border-radius:3px; }
+    .details { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px; }
+    .panel h2 { font-size:15px; margin:12px 14px 4px; font-weight:600; }
+    .panel canvas { display:block; width:100%; height:300px; }
+    .note { margin:12px 0 0; font-size:13px; color:#526a78; }
+    .demo { margin:0 0 14px; padding:10px 12px; border:1px solid #b7d8e2; border-radius:7px; background:#edf8fb; color:#234b58; font-size:14px; }
+    @media(max-width:700px) { body { padding:10px; } .details,.choices { grid-template-columns:1fr; } #view3d { min-height:340px; height:50vh; } .panel canvas { height:240px; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Демонстрационный расчёт укладки труб</h1>
+  <p class="demo"><strong>Портфолио-версия.</strong> Все размеры заготовок и параметры тары являются демонстрационными и не относятся к производственным заданиям.</p>
+  <div class="controls">
+    <label>Позиция и длина
+      <select id="variant" aria-label="Позиция и длина"></select>
+    </label>
+    <label>Диаметр для расчёта
+      <select id="diameterMode" aria-label="Диаметр для расчёта">
+        <option value="max">Предельный (+1,5%)</option>
+        <option value="nominal">Номинальный</option>
+      </select>
+    </label>
+    <label class="range"><span id="rowCaption">Показать рядов:</span> <span id="rowLabel">—</span>
+      <input id="rows" type="range" min="1" max="1" value="1" aria-label="Число показанных рядов">
+    </label>
+    <label>Действие мыши или пальца
+      <select id="action" aria-label="Действие мыши или пальца">
+        <option value="orbit">Вращать поддон</option>
+        <option value="floor">Двигать заготовку по поддону</option>
+        <option value="height">Поднимать и опускать заготовку</option>
+      </select>
+    </label>
+    <label>Плотность, кг/м³
+      <input id="density" type="number" min="1000" max="20000" step="10" value="7850">
+    </label>
+    <label>Масса пустой тары, кг
+      <input id="tare" type="number" min="0" step="1" placeholder="если известна">
+    </label>
+    <label>Ускорение для оценки, g
+      <input id="acceleration" type="number" min="0" max="2" step="0.05" value="0.3">
+    </label>
+    <label class="toggle"><input id="walls" type="checkbox" checked> Показать борта</label>
+    <button id="reset" type="button">Исходный вид</button>
+    <button id="resetLayout" type="button">Вернуть исходную укладку</button>
+  </div>
+  <div id="orientationOptions" class="choices" aria-label="Три варианта укладки"></div>
+  <div id="metrics" class="metrics" aria-live="polite"></div>
+  <section class="mainview">
+    <canvas id="view3d" role="img" aria-label="Объёмная схема поддона с заготовками; вращайте мышью или пальцем"></canvas>
+    <div class="hint" id="hint">Повернуть — перетащить · Масштаб — колесо мыши</div>
+  </section>
+  <div class="details">
+    <section class="panel"><h2>Вид сверху — нижний ряд</h2><canvas id="plan" role="img" aria-label="План нижнего ряда поддона"></canvas></section>
+    <section class="panel"><h2 id="endTitle">Вид с торца — все показанные ряды</h2><canvas id="end" role="img" aria-label="Схема расположения заготовок по высоте"></canvas></section>
+  </div>
+  <p class="note">Варианты А и Б — горизонтальная укладка вдоль сторон поддона. Вариант В — вертикальные колонны из заготовок одной длины; расчёт количества геометрический. Дополнительный верхний ряд включён, только если верхний борт перекрывает центр заготовки; точное выступание показано в выбранном варианте. Колонны не скреплены: их устойчивость при перемещении, контакт торцов и допустимую нагрузку на поддон требуется проверять отдельно. «Геометрический показатель бокового распора» для А и Б — только наклон линии контакта, не нагрузка на борт. Масса оценена по выбранному диаметру, номинальной стенке и заданной плотности. Горизонтальная инерционная сила = масса всех заготовок × заданное ускорение; удар, трение и распор укладки не учтены. При ручном перемещении красным отмечаются пересечения и выход за габарит. Инструмент предназначен для предварительной геометрической оценки, а не для подтверждения безопасности перевозки.</p>
+</main>
+<script>
+(() => {
+  'use strict';
+  const W=1140, B=740, BOARD_H=190, BOARD_COUNT=6, H=BOARD_H*BOARD_COUNT;
+  const variants=[
+    [60,3,'180',180],[60,3,'240',240],
+    [89,4,'150',150],[89,4,'220',220],
+    [114,5,'100',100],[114,5,'160',160],
+    [159,6,'120',120],[159,6,'200',200],
+    [219,8,'90',90],[219,8,'180',180],
+    [273,8,'140',140],[273,8,'260',260]
+  ];
+  const el=id=>document.getElementById(id);
+  const selector=el('variant'), rowsInput=el('rows'), wallsInput=el('walls');
+  const diameterMode=el('diameterMode'), action=el('action');
+  let group=null;
+  variants.forEach((v,i)=>{
+    const key=`Ø${v[0]}×${v[1]}`;
+    if (!group || group.label!==key) { group=document.createElement('optgroup'); group.label=key; selector.appendChild(group); }
+    const option=document.createElement('option'); option.value=i;
+    option.textContent=`${key} — L ${v[2]} мм`; group.appendChild(option);
+  });
+  let model, shownRows, yaw=.72, pitch=.58, zoom=1, drag=null, pending=false;
+  let selectedAxis=null, alternatives=[];
+  let tubeState=[], selectedTube=null, moved=false, hitShapes=[], lastProjection=null;
+  let validation={outside:new Set(),colliding:new Set(),pairs:0,center:{x:W/2,y:B/2,z:H/2}};
+  const number=n=>n.toLocaleString('ru-RU',{maximumFractionDigits:1});
+
+  function section(cross,d) {
+    const n=Math.floor(cross/d+1e-9), step=(cross-d)/(n-1);
+    const rise=Math.sqrt(d*d-(step/2)**2);
+    let count=Math.floor((H-d)/rise+1e-9)+1;
+    const nextHeight=d+count*rise;
+    if(nextHeight-H<=d/2+1e-9)count++;
+    const rows=[];
+    for(let level=0;level<count;level++) {
+      const row=[], offset=level%2 ? step/2 : 0;
+      for(let i=0;i<n-(level%2);i++) row.push({cross:d/2+offset+i*step,z:d/2+level*rise,level});
+      rows.push(row);
+    }
+    return {rows,step,rise,wallRatio:step/(2*rise)};
+  }
+  function candidate(axis,d,length) {
+    const along=axis==='X'?W:B, cross=axis==='X'?B:W;
+    const nAlong=Math.floor(along/length+1e-9), gap=along-nAlong*length;
+    const geometry=section(cross,d);
+    const height=d+(geometry.rows.length-1)*geometry.rise;
+    return {axis,along,cross,nAlong,gap,...geometry,
+      total:nAlong*geometry.rows.reduce((sum,row)=>sum+row.length,0),
+      height,protrusion:Math.max(0,height-H)};
+  }
+  function verticalFootprint(d) {
+    const layouts=[];
+    const nx=Math.floor(W/d+1e-9),ny=Math.floor(B/d+1e-9);
+    const square=[];
+    for(let j=0;j<ny;j++)for(let i=0;i<nx;i++)
+      square.push({x:(W-(nx-1)*d)/2+i*d,y:(B-(ny-1)*d)/2+j*d});
+    layouts.push({name:'прямые ряды',points:square});
+    const pitch=d*Math.sqrt(3)/2;
+    const yRows=Math.floor((B-d)/pitch+1e-9)+1,hexX=[];
+    for(let j=0;j<yRows;j++){
+      const count=nx-j%2;
+      if(count<1)continue;
+      for(let i=0;i<count;i++)hexX.push({
+        x:(W-(count-1)*d)/2+i*d,
+        y:(B-(yRows-1)*pitch)/2+j*pitch});
+    }
+    layouts.push({name:'шахматные ряды вдоль 1140 мм',points:hexX});
+    const xRows=Math.floor((W-d)/pitch+1e-9)+1,hexY=[];
+    for(let i=0;i<xRows;i++){
+      const count=ny-i%2;
+      if(count<1)continue;
+      for(let j=0;j<count;j++)hexY.push({
+        x:(W-(xRows-1)*pitch)/2+i*pitch,
+        y:(B-(count-1)*d)/2+j*d});
+    }
+    layouts.push({name:'шахматные ряды вдоль 740 мм',points:hexY});
+    return layouts.reduce((best,layout)=>layout.points.length>best.points.length?layout:best);
+  }
+  function verticalCandidate(d,length) {
+    const layout=verticalFootprint(d);
+    let levels=Math.floor(H/length+1e-9);
+    if((levels+1)*length-H<=length/2+1e-9)levels++;
+    const rows=Array.from({length:levels},(_,level)=>layout.points.map(p=>({...p,z:(level+.5)*length,level})));
+    const height=levels*length,protrusion=Math.max(0,height-H);
+    return {axis:'Z',along:H,cross:W,rows,footprint:layout.points,pattern:layout.name,
+      nAlong:levels,gap:Math.max(0,H-height),total:layout.points.length*levels,height,protrusion};
+  }
+  function renderChoices() {
+    const density=Number(el('density').value);
+    const massOne=Math.PI/4*(model.d*model.d-(model.d-2*model.wall)**2)*model.length*density*1e-9;
+    el('orientationOptions').innerHTML=alternatives.map((v,i)=>{
+      const visibleRows=Math.min(shownRows,v.rows.length);
+      const visibleHeight=v.axis==='Z'?visibleRows*model.length:model.d+(visibleRows-1)*v.rise;
+      const visibleProtrusion=Math.max(0,visibleHeight-H);
+      const visibleTotal=v.axis==='Z'
+        ? v.footprint.length*visibleRows
+        : v.nAlong*v.rows.slice(0,visibleRows).reduce((sum,row)=>sum+row.length,0);
+      if(v.axis==='Z')return `<button class="choice" type="button" data-axis="Z" aria-pressed="${model.axis==='Z'}">
+        <strong>Вариант В — вертикально</strong>
+        <span class="choice-row">${number(visibleTotal)} шт. = ${v.footprint.length} колонн × ${visibleRows} ярусов</span>
+        <span class="choice-row">Основание: ${v.pattern}; высота ${number(visibleHeight)} мм</span>
+        <span class="choice-row">${visibleProtrusion>0?`Выступание над бортом: ${number(visibleProtrusion)} мм`:`Свободный ход вдоль вертикальной оси: ${number(H-visibleHeight)} мм`}</span>
+        <span class="choice-row">Масса заготовок ${density>0?`≈ ${number(massOne*visibleTotal)} кг`:'—'}</span>
+        <span class="caution">Колонны не скреплены; устойчивость при перевозке не подтверждена</span></button>`;
+      const frequencies=new Map();
+      for(const row of v.rows.slice(0,visibleRows))frequencies.set(row.length,(frequencies.get(row.length)||0)+1);
+      const formula=[...frequencies].map(([count,levels])=>`${levels}×${count}`).join(' + ');
+      const caution=v.wallRatio>1
+        ? '<span class="caution">Высокий боковой распор в упрощённой модели</span>' : '';
+      return `<button class="choice" type="button" data-axis="${v.axis}" aria-pressed="${v.axis===model.axis}">
+        <strong>Вариант ${i===0?'А':'Б'} — ось вдоль ${v.along} мм</strong>
+        <span class="choice-row">${number(visibleTotal)} шт. = ${v.nAlong} по длине × (${formula} в торце)</span>
+        <span class="choice-row">${visibleRows} рядов; высота ${number(visibleHeight)} мм</span>
+        <span class="choice-row">${visibleProtrusion>0?`Выступание над бортом: ${number(visibleProtrusion)} мм`:`Расстояние до верха бортов: ${number(H-visibleHeight)} мм`}</span>
+        <span class="choice-row">Масса заготовок ${density>0?`≈ ${number(massOne*visibleTotal)} кг`:'—'}</span>
+        <span class="choice-row">Свободный ход вдоль оси ${number(v.gap)} мм</span>
+        <span class="choice-row">Геометрический показатель бокового распора ${number(v.wallRatio)}</span>
+        ${caution}</button>`;
+    }).join('');
+  }
+  function selectModel() {
+    const [nominal,wall,lengthText,length]=variants[Number(selector.value)];
+    const d=nominal*(diameterMode.value==='max'?1.015:1);
+    const options=['X','Y'].map(a=>candidate(a,d,length));
+    const eligible=options.filter(o=>o.wallRatio<=1), pool=eligible.length?eligible:options;
+    pool.sort((a,b)=>a.gap-b.gap || a.wallRatio-b.wallRatio);
+    alternatives=[...options,verticalCandidate(d,length)];
+    const chosen=selectedAxis?alternatives.find(v=>v.axis===selectedAxis):pool[0];
+    model={nominal,wall,lengthText,length,d,...chosen};
+    tubeState=[];
+    if(model.axis==='Z'){
+      for(const row of model.rows)for(const p of row)
+        tubeState.push({x:p.x,y:p.y,z:p.z,baseX:p.x,baseY:p.y,baseZ:p.z,level:p.level});
+    }else{
+      for(let level=0;level<model.rows.length;level++)for(const cross of model.rows[level])for(let j=0;j<model.nAlong;j++){
+        const axial=model.gap/2+j*model.length+model.length/2;
+        const x=model.axis==='X'?axial:cross.cross,y=model.axis==='X'?cross.cross:axial;
+        tubeState.push({x,y,z:cross.z,baseX:x,baseY:y,baseZ:cross.z,level});
+      }
+    }
+    selectedTube=null; moved=false;
+    shownRows=model.rows.length;
+    rowsInput.max=shownRows; rowsInput.value=shownRows;
+    el('rowCaption').textContent=model.axis==='Z'?'Показать ярусов:':'Показать рядов:';
+    el('endTitle').textContent=model.axis==='Z'?'Вид сбоку — колонны первого ряда':'Вид с торца — все показанные ряды';
+    renderChoices();
+    update();
+  }
+  function inspectLayout() {
+    const outside=new Set(),colliding=new Set(),cells=new Map();
+    const m=model,r=m.d/2,axisX=m.axis==='X',axisZ=m.axis==='Z',epsilon=1e-5;
+    let pairs=0,sx=0,sy=0,sz=0;
+    const active=tubeState.filter(t=>t.level<shownRows);
+    const permittedProtrusion=shownRows===m.rows.length?m.protrusion:0;
+    for(const t of active){
+      sx+=t.x;sy+=t.y;sz+=t.z;
+      const allowedTop=H+permittedProtrusion;
+      const out=axisZ
+        ? t.x-r < -epsilon || t.x+r > W+epsilon || t.y-r < -epsilon || t.y+r > B+epsilon ||
+          t.z-m.length/2 < -epsilon || t.z+m.length/2 > allowedTop+epsilon
+        : axisX
+          ? t.x-m.length/2 < -epsilon || t.x+m.length/2 > W+epsilon ||
+            t.y-r < -epsilon || t.y+r > B+epsilon || t.z-r < -epsilon || t.z+r > allowedTop+epsilon
+          : t.y-m.length/2 < -epsilon || t.y+m.length/2 > B+epsilon ||
+            t.x-r < -epsilon || t.x+r > W+epsilon || t.z-r < -epsilon || t.z+r > allowedTop+epsilon;
+      if(out)outside.add(t);
+      const a=axisZ?t.z:axisX?t.x:t.y,c=axisZ?t.x:axisX?t.y:t.x,v=axisZ?t.y:t.z;
+      const ia=Math.floor(a/m.length),ic=Math.floor(c/m.d),iz=Math.floor(v/m.d);
+      for(let da=-1;da<=1;da++)for(let dc=-1;dc<=1;dc++)for(let dz=-1;dz<=1;dz++){
+        const bucket=cells.get(`${ia+da}:${ic+dc}:${iz+dz}`);
+        if(!bucket)continue;
+        for(const prior of bucket){
+          if(Math.abs(a-prior.a)<m.length-epsilon &&
+             Math.hypot(c-prior.c,v-prior.v)<m.d-epsilon){
+            pairs++;colliding.add(t);colliding.add(prior.tube);
+          }
+        }
+      }
+      const key=`${ia}:${ic}:${iz}`;
+      if(!cells.has(key))cells.set(key,[]);
+      cells.get(key).push({tube:t,a,c,v});
+    }
+    const n=active.length||1;
+    validation={outside,colliding,pairs,center:{x:sx/n,y:sy/n,z:sz/n}};
+  }
+  function update() {
+    inspectLayout();
+    el('rowLabel').textContent=`${shownRows} из ${model.rows.length}`;
+    const active=tubeState.filter(t=>t.level<shownRows);
+    const packageHeight=model.axis==='Z'
+      ? shownRows*model.length
+      : model.d+(shownRows-1)*model.rise;
+    const protrusion=Math.max(0,packageHeight-H);
+    const density=Number(el('density').value),tareText=el('tare').value.trim();
+    const tare=tareText===''?null:Number(tareText),acceleration=Number(el('acceleration').value);
+    const massOne=Math.PI/4*(model.d*model.d-(model.d-2*model.wall)**2)*model.length*density*1e-9;
+    const massAll=massOne*active.length;
+    const validMass=Number.isFinite(massAll)&&density>0;
+    const validAcceleration=Number.isFinite(acceleration)&&acceleration>=0;
+    const force=massAll*acceleration*9.80665/1000;
+    const items=[
+      ['Заготовка',`Ø${model.nominal}×${model.wall} · L ${model.lengthText}`],
+      ['Всего на поддоне',`${number(active.length)} шт.`],
+      ['Масса заготовок',validMass?`≈ ${number(massAll)} кг`:'—'],
+      ['Масса с тарой',validMass&&tare!==null&&Number.isFinite(tare)&&tare>=0?`≈ ${number(massAll+tare)} кг`:'укажите массу тары'],
+      [`Инерционная сила всего пакета при ${validAcceleration?number(acceleration):'—'} g`,validMass&&validAcceleration?`≈ ${number(force)} кН (${number(massAll*acceleration)} кгс)`:'—'],
+      [model.axis==='Z'?'Ярусов по высоте':'Рядов по высоте',`${shownRows}`],
+      ['Высота пакета',`${number(packageHeight)} мм`],
+      [protrusion>0?'Выступание над бортом':model.axis==='Z'?'Свободно до верха':'Расстояние до верха бортов',`${number(protrusion>0?protrusion:H-packageHeight)} мм`],
+      ['Диаметр в схеме',`${number(model.d)} мм`],
+      ['Направление оси',model.axis==='Z'?'вертикально':`вдоль ${model.along} мм`],
+      [model.axis==='Z'?'Свободный ход вдоль вертикальной оси':'Свободный ход вдоль оси',`${number(model.gap)} мм`],
+      ['Пересечения труб',`${number(validation.pairs)} пар`],
+      ['Вышли за габарит',`${number(validation.outside.size)} шт.`],
+      ['Центр массы заготовок',`X ${number(validation.center.x)} · Y ${number(validation.center.y)} · Z ${number(validation.center.z)} мм`],
+      ['Смещение центра массы',`${number(Math.hypot(validation.center.x-W/2,validation.center.y-B/2))} мм`]
+    ];
+    items.push(['Положение труб',moved?'изменено вручную':'расчётное']);
+    el('metrics').innerHTML=items.map(([a,b])=>{
+      const problem=(a==='Пересечения труб'&&validation.pairs>0)||
+                    (a==='Вышли за габарит'&&validation.outside.size>0);
+      return `<div class="metric${problem?' problem':''}"><small>${a}</small><strong>${b}</strong></div>`;
+    }).join('');
+    el('hint').textContent=action.value==='orbit'
+      ? 'Повернуть — перетащить · Масштаб — колесо мыши'
+      : action.value==='floor'
+        ? 'Нажмите на трубу и перетащите её по поддону'
+        : 'Нажмите на трубу и перетащите вверх или вниз';
+    requestDraw();
+  }
+  function setupCanvas(canvas) {
+    const dpr=Math.min(window.devicePixelRatio||1,2), rect=canvas.getBoundingClientRect();
+    canvas.width=Math.max(1,Math.round(rect.width*dpr));
+    canvas.height=Math.max(1,Math.round(rect.height*dpr));
+    const ctx=canvas.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
+    return {ctx,w:rect.width,h:rect.height};
+  }
+  function requestDraw() {
+    if(pending)return; pending=true;
+    requestAnimationFrame(()=>{pending=false;draw3d();drawPlan();drawEnd();});
+  }
+  function projectFactory(w,h) {
+    const ca=Math.cos(yaw),sa=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
+    const viewH=Math.max(H,model?.height||H);
+    const raw=(x,y,z)=>{
+      x-=W/2; y-=B/2; z-=viewH/2;
+      const a=ca*x-sa*y, b=sa*x+ca*y;
+      return {x:a,y:b*sp-z*cp,depth:b*cp+z*sp};
+    };
+    const corners=[];
+    for(const x of [0,W])for(const y of [0,B])for(const z of [0,viewH])corners.push(raw(x,y,z));
+    const minX=Math.min(...corners.map(p=>p.x)),maxX=Math.max(...corners.map(p=>p.x));
+    const minY=Math.min(...corners.map(p=>p.y)),maxY=Math.max(...corners.map(p=>p.y));
+    const scale=Math.min((w-48)/(maxX-minX),(h-48)/(maxY-minY))*zoom;
+    const cx=(minX+maxX)/2,cy=(minY+maxY)/2;
+    const project=(x,y,z)=>{const p=raw(x,y,z);return {x:w/2+(p.x-cx)*scale,y:h/2+(p.y-cy)*scale,depth:p.depth};};
+    project.scale=scale;
+    return project;
+  }
+  function path(ctx,points) {
+    ctx.beginPath(); ctx.moveTo(points[0].x,points[0].y);
+    for(let i=1;i<points.length;i++)ctx.lineTo(points[i].x,points[i].y);
+    ctx.closePath();
+  }
+  function hull(points) {
+    const q=[...points].sort((a,b)=>a.x-b.x||a.y-b.y), cross=(a,b,c)=>(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
+    const lower=[],upper=[];
+    for(const p of q){while(lower.length>1&&cross(lower[lower.length-2],lower[lower.length-1],p)<=0)lower.pop();lower.push(p);}
+    for(let i=q.length-1;i>=0;i--){const p=q[i];while(upper.length>1&&cross(upper[upper.length-2],upper[upper.length-1],p)<=0)upper.pop();upper.push(p);}
+    lower.pop();upper.pop();return lower.concat(upper);
+  }
+  function contains(points,x,y) {
+    let inside=false;
+    for(let i=0,j=points.length-1;i<points.length;j=i++){
+      const a=points[i],b=points[j];
+      if((a.y>y)!==(b.y>y) && x<(b.x-a.x)*(y-a.y)/(b.y-a.y)+a.x)inside=!inside;
+    }
+    return inside;
+  }
+  function ringPoints(cx,cy,cz,r,axis,P) {
+    const out=[];
+    for(let i=0;i<16;i++){
+      const t=2*Math.PI*i/16;
+      out.push(axis==='X'?P(cx,cy+r*Math.cos(t),cz+r*Math.sin(t)):
+               axis==='Y'?P(cx+r*Math.cos(t),cy,cz+r*Math.sin(t)):
+                          P(cx+r*Math.cos(t),cy+r*Math.sin(t),cz));
+    }
+    return out;
+  }
+  function drawTube(ctx,t,P) {
+    const m=model,half=m.length/2, alongX=m.axis==='X',vertical=m.axis==='Z';
+    const invalid=validation.outside.has(t)||validation.colliding.has(t);
+    const a=vertical?[t.x,t.y,t.z-half]:alongX?[t.x-half,t.y,t.z]:[t.x,t.y-half,t.z];
+    const b=vertical?[t.x,t.y,t.z+half]:alongX?[t.x+half,t.y,t.z]:[t.x,t.y+half,t.z];
+    const pa=P(...a),pb=P(...b),near=pa.depth>pb.depth?a:b;
+    const outerA=ringPoints(...a,m.d/2,m.axis,P),outerB=ringPoints(...b,m.d/2,m.axis,P);
+    const silhouette=hull(outerA.concat(outerB));
+    ctx.fillStyle=invalid?'#d76a62':t===selectedTube?'#d49358':t.level%2?'#7d96a7':'#91aabd'; path(ctx,silhouette);ctx.fill();
+    ctx.strokeStyle='#4c6474';ctx.lineWidth=.8;ctx.stroke();
+    const outer=ringPoints(...near,m.d/2,m.axis,P);
+    const inner=ringPoints(...near,(m.d-2*m.wall)/2,m.axis,P);
+    path(ctx,outer);ctx.fillStyle=invalid?'#f7b8b3':t===selectedTube?'#f5d4af':'#d7e2e9';ctx.fill();ctx.strokeStyle='#405665';ctx.lineWidth=1;ctx.stroke();
+    path(ctx,inner);ctx.fillStyle='#263b49';ctx.fill();ctx.strokeStyle='#405665';ctx.lineWidth=.8;ctx.stroke();
+    hitShapes.push({tube:t,points:silhouette});
+  }
+  function drawLine(ctx,P,a,b,color,width=1) {
+    const p=P(...a),q=P(...b);ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(q.x,q.y);
+    ctx.strokeStyle=color;ctx.lineWidth=width;ctx.stroke();
+  }
+  function drawCenterMarker(ctx,p) {
+    ctx.beginPath();ctx.arc(p.x,p.y,6,0,Math.PI*2);
+    ctx.fillStyle='#0b806d';ctx.fill();ctx.strokeStyle='white';ctx.lineWidth=2;ctx.stroke();
+    ctx.fillStyle='#0b806d';ctx.font='bold 12px Arial, sans-serif';ctx.fillText('ЦМ',p.x+9,p.y-8);
+  }
+  function boardFrame(ctx,P) {
+    const corners=[[0,0],[W,0],[W,B],[0,B]];
+    for(let k=0;k<=6;k++){
+      const z=k*BOARD_H;
+      for(let i=0;i<4;i++){
+        const a=corners[i],b=corners[(i+1)%4];
+        drawLine(ctx,P,[a[0],a[1],z],[b[0],b[1],z],k===0?'#795338':'#ac794f',k===0?2:1.5);
+      }
+    }
+    for(const [x,y] of corners)drawLine(ctx,P,[x,y,0],[x,y,H],'#875d3d',2);
+  }
+  function draw3d() {
+    if(!model)return;
+    const {ctx,w,h}=setupCanvas(el('view3d'));
+    ctx.clearRect(0,0,w,h);ctx.fillStyle='#fbfcfd';ctx.fillRect(0,0,w,h);
+    const P=projectFactory(w,h);lastProjection=P;
+    hitShapes=[];
+    const base=[[0,0,0],[W,0,0],[W,B,0],[0,B,0]].map(p=>P(...p));
+    path(ctx,base);ctx.fillStyle='#e6ddd0';ctx.fill();ctx.strokeStyle='#927456';ctx.lineWidth=2;ctx.stroke();
+    const tubes=tubeState.filter(t=>t.level<shownRows).map(t=>({tube:t,depth:P(t.x,t.y,t.z).depth}));
+    tubes.sort((a,b)=>a.depth-b.depth);
+    for(const item of tubes)drawTube(ctx,item.tube,P);
+    if(wallsInput.checked)boardFrame(ctx,P);
+    drawCenterMarker(ctx,P(validation.center.x,validation.center.y,validation.center.z));
+  }
+  function drawPlan() {
+    if(!model)return;
+    const {ctx,w,h}=setupCanvas(el('plan')),m=model;
+    ctx.clearRect(0,0,w,h);
+    const s=Math.min((w-30)/W,(h-25)/B),ox=(w-W*s)/2,oy=(h-B*s)/2;
+    ctx.strokeStyle='#8c6848';ctx.lineWidth=3;ctx.strokeRect(ox,oy,W*s,B*s);
+    for(const t of tubeState.filter(t=>t.level===0)){
+      if(m.axis==='Z'){
+        const invalid=validation.outside.has(t)||validation.colliding.has(t);
+        ctx.beginPath();ctx.arc(ox+t.x*s,oy+t.y*s,m.d*s/2,0,Math.PI*2);
+        ctx.fillStyle=invalid?'#f7b8b3':t===selectedTube?'#f5d4af':'#d9e4eb';ctx.fill();
+        ctx.strokeStyle='#4c6474';ctx.lineWidth=1;ctx.stroke();
+        ctx.beginPath();ctx.arc(ox+t.x*s,oy+t.y*s,(m.d-2*m.wall)*s/2,0,Math.PI*2);
+        ctx.fillStyle='white';ctx.fill();ctx.stroke();
+        continue;
+      }
+      const x=m.axis==='X'?t.x-m.length/2:t.x-m.d/2;
+      const y=m.axis==='X'?t.y-m.d/2:t.y-m.length/2;
+      const ww=m.axis==='X'?m.length:m.d,hh=m.axis==='X'?m.d:m.length;
+      const invalid=validation.outside.has(t)||validation.colliding.has(t);
+      ctx.fillStyle=invalid?'#f7b8b3':t===selectedTube?'#f5d4af':'#d9e4eb';ctx.fillRect(ox+x*s,oy+y*s,ww*s,hh*s);
+      ctx.strokeStyle='#4c6474';ctx.lineWidth=1;ctx.strokeRect(ox+x*s,oy+y*s,ww*s,hh*s);
+    }
+    drawCenterMarker(ctx,{x:ox+validation.center.x*s,y:oy+validation.center.y*s});
+  }
+  function drawEnd() {
+    if(!model)return;
+    const {ctx,w,h}=setupCanvas(el('end')),m=model;
+    ctx.clearRect(0,0,w,h);
+    const viewH=Math.max(H,m.height);
+    if(m.axis==='Z'){
+      const s=Math.min((w-30)/W,(h-25)/viewH),ox=(w-W*s)/2,oy=(h-viewH*s)/2;
+      ctx.strokeStyle='#8c6848';ctx.lineWidth=3;ctx.strokeRect(ox,oy+(viewH-H)*s,W*s,H*s);
+      const frontY=Math.min(...m.footprint.map(p=>p.y));
+      for(const t of tubeState.filter(t=>t.level<shownRows&&Math.abs(t.y-frontY)<1e-6)){
+        const invalid=validation.outside.has(t)||validation.colliding.has(t);
+        ctx.fillStyle=invalid?'#f7b8b3':t===selectedTube?'#f5d4af':t.level%2?'#b9cad5':'#d9e4eb';
+        ctx.fillRect(ox+(t.x-m.d/2)*s,oy+(viewH-t.z-m.length/2)*s,m.d*s,m.length*s);
+        ctx.strokeStyle='#4c6474';ctx.lineWidth=1;
+        ctx.strokeRect(ox+(t.x-m.d/2)*s,oy+(viewH-t.z-m.length/2)*s,m.d*s,m.length*s);
+      }
+      drawCenterMarker(ctx,{x:ox+validation.center.x*s,y:oy+(viewH-validation.center.z)*s});
+      return;
+    }
+    const s=Math.min((w-30)/m.cross,(h-25)/viewH),ox=(w-m.cross*s)/2,oy=(h-viewH*s)/2;
+    ctx.strokeStyle='#8c6848';ctx.lineWidth=3;ctx.strokeRect(ox,oy+(viewH-H)*s,m.cross*s,H*s);
+    for(const t of tubeState.filter(t=>t.level<shownRows)){
+      const cross=m.axis==='X'?t.y:t.x;
+      const x=ox+cross*s,y=oy+(viewH-t.z)*s;
+      ctx.beginPath();ctx.arc(x,y,m.d*s/2,0,Math.PI*2);
+      const invalid=validation.outside.has(t)||validation.colliding.has(t);
+      ctx.fillStyle=invalid?'#f7b8b3':t===selectedTube?'#f5d4af':t.level%2?'#b9cad5':'#d9e4eb';ctx.fill();
+      ctx.strokeStyle='#4c6474';ctx.lineWidth=1;ctx.stroke();
+      ctx.beginPath();ctx.arc(x,y,(m.d-2*m.wall)*s/2,0,Math.PI*2);
+      ctx.fillStyle='white';ctx.fill();ctx.stroke();
+    }
+    const cross=m.axis==='X'?validation.center.y:validation.center.x;
+    drawCenterMarker(ctx,{x:ox+cross*s,y:oy+(viewH-validation.center.z)*s});
+  }
+  selector.addEventListener('change',()=>{selectedAxis=null;selectModel();});
+  diameterMode.addEventListener('change',selectModel);
+  el('orientationOptions').addEventListener('click',e=>{
+    const button=e.target.closest('button[data-axis]');
+    if(!button)return;
+    selectedAxis=button.dataset.axis;
+    selectModel();
+  });
+  rowsInput.addEventListener('input',()=>{shownRows=Number(rowsInput.value);renderChoices();update();});
+  action.addEventListener('change',update);
+  el('density').addEventListener('input',()=>{renderChoices();update();});
+  for(const id of ['tare','acceleration'])el(id).addEventListener('input',update);
+  wallsInput.addEventListener('change',requestDraw);
+  el('reset').addEventListener('click',()=>{yaw=.72;pitch=.58;zoom=1;shownRows=model.rows.length;rowsInput.value=shownRows;renderChoices();update();});
+  el('resetLayout').addEventListener('click',()=>{
+    for(const t of tubeState){t.x=t.baseX;t.y=t.baseY;t.z=t.baseZ;}
+    selectedTube=null;moved=false;update();
+  });
+  const view=el('view3d');
+  view.addEventListener('pointerdown',e=>{
+    if(action.value==='orbit'){
+      drag={kind:'orbit',x:e.clientX,y:e.clientY,yaw,pitch};
+    } else {
+      const rect=view.getBoundingClientRect(),x=e.clientX-rect.left,y=e.clientY-rect.top;
+      const hit=[...hitShapes].reverse().find(h=>contains(h.points,x,y));
+      if(!hit){selectedTube=null;requestDraw();return;}
+      selectedTube=hit.tube;
+      drag={kind:action.value,x:e.clientX,y:e.clientY,
+            x0:hit.tube.x,y0:hit.tube.y,z0:hit.tube.z,scale:lastProjection.scale};
+      requestDraw();
+    }
+    view.setPointerCapture(e.pointerId);
+  });
+  view.addEventListener('pointermove',e=>{
+    if(!drag)return;
+    if(drag.kind==='orbit'){
+      yaw=drag.yaw+(e.clientX-drag.x)*.008;
+      pitch=Math.max(.15,Math.min(1.4,drag.pitch+(e.clientY-drag.y)*.006));
+    } else if(drag.kind==='floor'){
+      const u=(e.clientX-drag.x)/drag.scale;
+      const v=(e.clientY-drag.y)/(drag.scale*Math.sin(pitch));
+      selectedTube.x=drag.x0+Math.cos(yaw)*u+Math.sin(yaw)*v;
+      selectedTube.y=drag.y0-Math.sin(yaw)*u+Math.cos(yaw)*v;
+      moved=true;
+    } else {
+      selectedTube.z=drag.z0-(e.clientY-drag.y)/(drag.scale*Math.cos(pitch));
+      moved=true;
+    }
+    if(drag.kind==='orbit')requestDraw();else update();
+  });
+  view.addEventListener('pointerup',()=>{if(drag&&drag.kind!=='orbit')update();drag=null;});
+  view.addEventListener('pointercancel',()=>{if(drag&&drag.kind!=='orbit')update();drag=null;});
+  view.addEventListener('wheel',e=>{e.preventDefault();zoom=Math.max(.45,Math.min(2.5,zoom*Math.exp(-e.deltaY*.001)));requestDraw();},{passive:false});
+  new ResizeObserver(requestDraw).observe(view);
+  new ResizeObserver(requestDraw).observe(el('plan'));
+  new ResizeObserver(requestDraw).observe(el('end'));
+  selectModel();
+})();
+</script>
+</body>
+</html>
